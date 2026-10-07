@@ -3,13 +3,14 @@
 # chaque vidéo du dossier courant et de ses sous-dossiers.
 #
 # Prérequis (macOS) :  brew install ffmpeg
-# Utilisation       :  cd /dossier/de/videos && /chemin/vers/planche-contact.sh
+# Utilisation       :  cd /dossier/de/videos && planche-contact.sh [options]
+#                      planche-contact.sh -h   pour la liste des options
 #
 # Compatible avec bash 3.2 (celui de macOS).
 
 set -u
 
-CONF_FILE="$HOME/.planche-contact.conf"
+CONF_FILE="${PLANCHE_CONF:-$HOME/.planche-contact.conf}"
 
 # ---------------------------------------------------------------- paramètres
 NB_CAPTURES=12          # nombre de captures par vidéo
@@ -18,12 +19,49 @@ LARGEUR_VIGNETTE=480    # largeur de chaque capture (px)
 MARGE_INTERNE=6         # marge entre les images (px)
 MARGE_EXTERNE=6         # marge autour du damier (px)
 COULEUR_FOND="black"    # couleur de fond / des marges (nom ffmpeg ou 0xRRGGBB)
-PREFIXE="planche_"      # préfixe du fichier de sortie
 FORMAT="jpg"            # jpg ou png
-QUALITE_JPG=3           # 2 (excellente) … 31 (mauvaise)
+QUALITE=95              # qualité JPEG en % (1 à 100)
+PREFIXE="planche_"      # préfixe du fichier de sortie
 EXTENSIONS="mp4 mov mkv avi m4v wmv flv webm mpg mpeg mts m2ts ts"
-DOSSIER_SORTIE=""       # vide = à côté de la vidéo ; sinon chemin (relatif ou absolu)
+DOSSIER_SORTIE=""       # vide = à côté de la vidéo ; sinon chemin
 ECRASER="non"           # oui / non : remplacer une planche déjà existante
+
+# Description des réglages affichés dans le menu (tableaux parallèles).
+# Types : int (min/max/pas), choice (liste fermée), choice+ (liste + saisie
+# libre), text (saisie libre).
+KEYS=(NB_CAPTURES COLONNES LARGEUR_VIGNETTE MARGE_INTERNE MARGE_EXTERNE
+      COULEUR_FOND FORMAT QUALITE PREFIXE EXTENSIONS DOSSIER_SORTIE ECRASER)
+LABELS=("Nombre de captures" "Colonnes du damier" "Largeur d'une capture (px)"
+        "Marge entre les images (px)" "Marge autour du damier (px)"
+        "Couleur de fond" "Format de sortie" "Qualité JPEG (%)"
+        "Préfixe du fichier" "Extensions traitées" "Dossier de sortie"
+        "Écraser l'existant")
+TYPES=(int int int int int choice+ choice int text text text choice)
+MINS=(1 1 100 0 0 "" "" 1 "" "" "" "")
+MAXS=(500 50 4000 200 200 "" "" 100 "" "" "" "")
+STEPS=(1 1 20 1 1 "" "" 1 "" "" "" "")
+CHOICES=("" "" "" "" "" "black white gray 0x202020 0xf0f0f0" "jpg png" "" "" "" "" "non oui")
+HINTS=("Combien d'images extraites, réparties uniformément sur la vidéo."
+       "Nombre d'images par ligne du damier."
+       "Largeur de chaque vignette ; la hauteur suit le format de la vidéo."
+       "Espace entre deux vignettes."
+       "Espace entre le damier et le bord de l'image."
+       "Couleur des marges : choisir avec ←/→ ou saisir (nom ffmpeg, 0xRRGGBB)."
+       "jpg (léger) ou png (sans perte)."
+       "100 = meilleure qualité, fichier plus lourd (jpg uniquement)."
+       "Début du nom du fichier produit. « - » pour aucun préfixe."
+       "Extensions séparées par des espaces."
+       "Vide = à côté de chaque vidéo. « - » pour revenir à ce mode."
+       "Régénérer les planches déjà présentes ?")
+
+NB_KEYS=${#KEYS[@]}
+MSG=""
+ERR=""
+KEY=""
+NB_VIDEOS=0
+
+# Valeurs par défaut conservées pour la touche « d » (réinitialiser).
+for k in "${KEYS[@]}"; do printf -v "DEF_$k" '%s' "${!k}"; done
 
 charger_conf() {
   # shellcheck disable=SC1090
@@ -32,15 +70,13 @@ charger_conf() {
 
 sauver_conf() {
   {
-    for v in NB_CAPTURES COLONNES LARGEUR_VIGNETTE MARGE_INTERNE MARGE_EXTERNE \
-             COULEUR_FOND PREFIXE FORMAT QUALITE_JPG EXTENSIONS DOSSIER_SORTIE ECRASER; do
-      printf '%s=%q\n' "$v" "${!v}"
-    done
+    for k in "${KEYS[@]}"; do printf '%s=%q\n' "$k" "${!k}"; done
   } > "$CONF_FILE"
 }
 
 # ------------------------------------------------------------------- outils
 verifier_outils() {
+  local outil
   for outil in ffmpeg ffprobe; do
     if ! command -v "$outil" >/dev/null 2>&1; then
       echo "Erreur : '$outil' est introuvable. Installez-le avec :  brew install ffmpeg" >&2
@@ -49,83 +85,252 @@ verifier_outils() {
   done
 }
 
-est_entier_positif() { case "$1" in ''|*[!0-9]*|0) return 1 ;; *) return 0 ;; esac; }
-est_entier()         { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+indice_de() { # indice_de CLE -> affiche l'indice dans KEYS
+  local i
+  for ((i = 0; i < NB_KEYS; i++)); do
+    [ "${KEYS[$i]}" = "$1" ] && { echo "$i"; return 0; }
+  done
+  return 1
+}
 
-# --------------------------------------------------------------------- menu
-saisir() { # saisir "invite" VARIABLE validateur
-  local invite="$1" var="$2" valid="$3" val
-  printf '%s [%s] : ' "$invite" "${!var}"
-  read -r val
-  [ -z "$val" ] && return
-  if [ "$valid" = "-" ] || $valid "$val"; then
-    printf -v "$var" '%s' "$val"
+# valider INDICE VALEUR : renvoie 0 si valide, sinon 1 et le motif dans ERR
+valider() {
+  local i=$1 v=$2 c
+  case "${TYPES[$i]}" in
+    int)
+      case "$v" in ''|*[!0-9]*) ERR="un nombre entier est attendu"; return 1 ;; esac
+      if [ "${#v}" -gt 6 ] || [ "$v" -lt "${MINS[$i]}" ] || [ "$v" -gt "${MAXS[$i]}" ]; then
+        ERR="valeur attendue entre ${MINS[$i]} et ${MAXS[$i]}"; return 1
+      fi ;;
+    choice)
+      for c in ${CHOICES[$i]}; do [ "$c" = "$v" ] && return 0; done
+      ERR="choix possibles : ${CHOICES[$i]}"; return 1 ;;
+    choice+)
+      [ -n "$v" ] || { ERR="la valeur ne peut pas être vide"; return 1; } ;;
+    text)
+      case "${KEYS[$i]}" in
+        EXTENSIONS) [ -n "${v// /}" ] || { ERR="au moins une extension"; return 1; } ;;
+        PREFIXE)    case "$v" in */*) ERR="« / » interdit dans un préfixe"; return 1 ;; esac ;;
+      esac ;;
+  esac
+  return 0
+}
+
+# regler CLE VALEUR : applique une valeur validée (utilisé par les options)
+regler() {
+  local i
+  i=$(indice_de "$1") || return 1
+  if valider "$i" "$2"; then
+    printf -v "$1" '%s' "$2"
   else
-    echo "  Valeur invalide, inchangée."
-    sleep 1
+    echo "Option invalide pour ${LABELS[$i]} : $ERR" >&2
+    exit 2
   fi
 }
 
-valide_format() { case "$1" in jpg|png) return 0 ;; *) return 1 ;; esac; }
-valide_oui_non() { case "$1" in oui|non) return 0 ;; *) return 1 ;; esac; }
-valide_qualite() { est_entier_positif "$1" && [ "$1" -le 31 ]; }
+# ------------------------------------------------- recherche des vidéos
+# Écrit sur stdout les chemins (séparés par NUL) des vidéos à traiter.
+lister_videos() {
+  local args=() ext premier=1 exclure=()
+  for ext in $EXTENSIONS; do
+    ext="${ext#.}"
+    [ $premier -eq 0 ] && args+=(-o)
+    args+=(-iname "*.${ext}")
+    premier=0
+  done
+  [ $premier -eq 1 ] && return 0
+  [ -n "$PREFIXE" ] && exclure=(! -name "${PREFIXE}*")
+  find . -type f \( "${args[@]}" \) "${exclure[@]+"${exclure[@]}"}" -print0 2>/dev/null | sort -z
+}
 
-afficher_menu() {
-  clear
-  cat <<EOF
-=====================================================
-   PLANCHE CONTACT VIDÉO
-   Dossier : $(pwd)
-=====================================================
-  1) Nombre de captures par vidéo ....... $NB_CAPTURES
-  2) Nombre de colonnes ................. $COLONNES
-  3) Largeur d'une capture (px) ......... $LARGEUR_VIGNETTE
-  4) Marge entre les images (px) ........ $MARGE_INTERNE
-  5) Marge autour du damier (px) ........ $MARGE_EXTERNE
-  6) Couleur de fond .................... $COULEUR_FOND
-  7) Préfixe du fichier de sortie ....... $PREFIXE
-  8) Format (jpg / png) ................. $FORMAT
-  9) Qualité JPEG (2=max … 31=min) ...... $QUALITE_JPG
- 10) Extensions vidéo traitées .......... $EXTENSIONS
- 11) Dossier de sortie (vide = à côté) .. ${DOSSIER_SORTIE:-<à côté de la vidéo>}
- 12) Écraser les planches existantes .... $ECRASER
+compter_videos() {
+  NB_VIDEOS=$(lister_videos | tr -cd '\0' | wc -c | tr -d ' ')
+}
 
-  s) Sauvegarder ces réglages   l) Lancer le traitement   q) Quitter
------------------------------------------------------
-EOF
+# ------------------------------------------------------------ menu interactif
+# lire_touche : place dans KEY UP / DOWN / LEFT / RIGHT / ENTER / ESC / EOF
+# ou le caractère tapé.
+lire_touche() {
+  local k rest
+  KEY=""
+  IFS= read -rsn1 k || { KEY="EOF"; return; }
+  if [ "$k" = $'\033' ]; then
+    rest=""
+    read -rsn2 -t 1 rest
+    case "$rest" in
+      '[A') KEY="UP" ;;
+      '[B') KEY="DOWN" ;;
+      '[C') KEY="RIGHT" ;;
+      '[D') KEY="LEFT" ;;
+      *)    KEY="ESC" ;;
+    esac
+  elif [ -z "$k" ]; then
+    KEY="ENTER"
+  else
+    KEY="$k"
+  fi
+}
+
+valeur_affichee() { # valeur_affichee INDICE
+  local i=$1 k v
+  k="${KEYS[$i]}"; v="${!k}"
+  case "${TYPES[$i]}" in
+    int|choice|choice+) printf '‹ %s ›' "$v" ;;
+    *)
+      if [ -z "$v" ]; then
+        case "$k" in
+          PREFIXE)        printf '\033[2m‹aucun›\033[22m' ;;
+          DOSSIER_SORTIE) printf '\033[2m‹à côté de chaque vidéo›\033[22m' ;;
+        esac
+      else
+        printf '%s' "$v"
+      fi ;;
+  esac
+}
+
+apercu() {
+  local cols=$COLONNES nb=$NB_CAPTURES rows r c idx h wt ht
+  [ "$cols" -gt "$nb" ] && cols=$nb
+  rows=$(( (nb + cols - 1) / cols ))
+  h=$(( LARGEUR_VIGNETTE * 9 / 16 / 2 * 2 ))
+  wt=$(( cols * LARGEUR_VIGNETTE + (cols - 1) * MARGE_INTERNE + 2 * MARGE_EXTERNE ))
+  ht=$(( rows * h + (rows - 1) * MARGE_INTERNE + 2 * MARGE_EXTERNE ))
+  printf ' Planche obtenue : %d colonnes × %d lignes, environ %d × %d px (vignettes 16:9)\n' \
+    "$cols" "$rows" "$wt" "$ht"
+  if [ "$cols" -le 16 ] && [ "$rows" -le 8 ]; then
+    for ((r = 0; r < rows; r++)); do
+      printf '   '
+      for ((c = 0; c < cols; c++)); do
+        idx=$(( r * cols + c ))
+        if [ "$idx" -lt "$nb" ]; then printf '▇▇ '; else printf '·· '; fi
+      done
+      printf '\n'
+    done
+  fi
+}
+
+dessiner() { # dessiner SELECTION
+  local sel=$1 i pad label marque
+  printf '\033[H\033[2J'
+  printf '\033[1m PLANCHE CONTACT VIDÉO\033[0m\n'
+  printf ' Dossier : %s\n' "$PWD"
+  printf ' %s vidéo(s) trouvée(s) (sous-dossiers compris)\n\n' "$NB_VIDEOS"
+  for ((i = 0; i < NB_KEYS; i++)); do
+    label="${LABELS[$i]}"
+    pad=$(( 30 - ${#label} )); [ $pad -lt 1 ] && pad=1
+    marque=" "
+    if [ "$i" -eq "$sel" ]; then marque="▶"; printf '\033[7m'; fi
+    printf ' %s %s%*s' "$marque" "$label" "$pad" ''
+    if [ "${KEYS[$i]}" = "QUALITE" ] && [ "$FORMAT" != "jpg" ]; then
+      printf '\033[2m(jpg uniquement)\033[22m'
+    else
+      valeur_affichee "$i"
+    fi
+    printf '\033[0m\n'
+  done
+  if [ "$sel" -eq "$NB_KEYS" ]; then printf '\033[7m\033[1m'; else printf '\033[1m'; fi
+  printf '\n ▶ LANCER LE TRAITEMENT\033[0m\n\n'
+  apercu
+  printf '\n'
+  if [ "$sel" -lt "$NB_KEYS" ]; then printf ' \033[2m%s\033[22m\n' "${HINTS[$sel]}"; fi
+  [ -n "$MSG" ] && printf ' \033[33m%s\033[0m\n' "$MSG"
+  MSG=""
+  printf '\n \033[2m↑↓ choisir   ←→ modifier   Entrée saisir/lancer   s sauvegarder   d défauts   q quitter\033[22m\n'
+}
+
+ajuster() { # ajuster INDICE SENS(+1/-1)
+  local i=$1 dir=$2 k v c n idx pas
+  k="${KEYS[$i]}"; v="${!k}"
+  case "${TYPES[$i]}" in
+    int)
+      pas=${STEPS[$i]}
+      v=$(( v + dir * pas ))
+      [ "$v" -lt "${MINS[$i]}" ] && v=${MINS[$i]}
+      [ "$v" -gt "${MAXS[$i]}" ] && v=${MAXS[$i]}
+      printf -v "$k" '%s' "$v" ;;
+    choice|choice+)
+      n=0; idx=-1
+      for c in ${CHOICES[$i]}; do
+        [ "$c" = "$v" ] && idx=$n
+        n=$((n + 1))
+      done
+      idx=$(( (idx + dir + n) % n ))
+      n=0
+      for c in ${CHOICES[$i]}; do
+        [ $n -eq $idx ] && printf -v "$k" '%s' "$c"
+        n=$((n + 1))
+      done ;;
+  esac
+}
+
+editer() { # editer INDICE : saisie au clavier d'une valeur
+  local i=$1 k val
+  k="${KEYS[$i]}"
+  case "${TYPES[$i]}" in
+    choice) ajuster "$i" 1; return ;;
+  esac
+  printf '\n'
+  case "${TYPES[$i]}" in
+    int) printf ' %s : entier de %s à %s' "${LABELS[$i]}" "${MINS[$i]}" "${MAXS[$i]}" ;;
+    *)   printf ' %s' "${LABELS[$i]}" ;;
+  esac
+  printf ' (Entrée seule = inchangé)\n'
+  printf '\033[?25h'
+  IFS= read -r -e -p " ➜ " val
+  printf '\033[?25l'
+  [ -z "$val" ] && return
+  case "$k" in
+    PREFIXE|DOSSIER_SORTIE) [ "$val" = "-" ] && val="" ;;
+  esac
+  if valider "$i" "$val"; then
+    printf -v "$k" '%s' "$val"
+    case "$k" in EXTENSIONS|PREFIXE) compter_videos ;; esac
+  else
+    MSG="Valeur refusée : $ERR."
+  fi
 }
 
 menu() {
-  local choix
+  local sel=0 k v
+  trap 'printf "\033[?25h\n"' EXIT
+  printf '\033[?25l'
   while true; do
-    afficher_menu
-    printf 'Votre choix : '
-    read -r choix
-    case "$choix" in
-      1)  saisir "Nombre de captures" NB_CAPTURES est_entier_positif ;;
-      2)  saisir "Nombre de colonnes" COLONNES est_entier_positif ;;
-      3)  saisir "Largeur d'une capture (px)" LARGEUR_VIGNETTE est_entier_positif ;;
-      4)  saisir "Marge entre les images (px)" MARGE_INTERNE est_entier ;;
-      5)  saisir "Marge autour du damier (px)" MARGE_EXTERNE est_entier ;;
-      6)  saisir "Couleur de fond (ex. black, white, 0x202020)" COULEUR_FOND - ;;
-      7)  printf 'Préfixe [%s] (tapez - pour aucun) : ' "$PREFIXE"
-          read -r val
-          [ "$val" = "-" ] && PREFIXE="" || { [ -n "$val" ] && PREFIXE="$val"; } ;;
-      8)  saisir "Format (jpg ou png)" FORMAT valide_format ;;
-      9)  saisir "Qualité JPEG (2 à 31)" QUALITE_JPG valide_qualite ;;
-      10) saisir "Extensions séparées par des espaces" EXTENSIONS - ;;
-      11) printf 'Dossier de sortie [%s] (tapez - pour revenir à "à côté de la vidéo") : ' "$DOSSIER_SORTIE"
-          read -r val
-          [ "$val" = "-" ] && DOSSIER_SORTIE="" || { [ -n "$val" ] && DOSSIER_SORTIE="$val"; } ;;
-      12) saisir "Écraser les planches existantes (oui/non)" ECRASER valide_oui_non ;;
-      s|S) sauver_conf; echo "Réglages sauvegardés dans $CONF_FILE"; sleep 1 ;;
-      l|L) return 0 ;;
-      q|Q) exit 0 ;;
+    dessiner "$sel"
+    lire_touche
+    case "$KEY" in
+      UP)    sel=$(( (sel + NB_KEYS) % (NB_KEYS + 1) )) ;;
+      DOWN)  sel=$(( (sel + 1) % (NB_KEYS + 1) )) ;;
+      LEFT)  [ "$sel" -lt "$NB_KEYS" ] && ajuster "$sel" -1 ;;
+      RIGHT|' ') [ "$sel" -lt "$NB_KEYS" ] && ajuster "$sel" 1 ;;
+      ENTER)
+        if [ "$sel" -eq "$NB_KEYS" ]; then break; else editer "$sel"; fi ;;
+      l|L) break ;;
+      s|S) sauver_conf; MSG="Réglages sauvegardés dans $CONF_FILE" ;;
+      d|D)
+        for k in "${KEYS[@]}"; do v="DEF_$k"; printf -v "$k" '%s' "${!v}"; done
+        compter_videos
+        MSG="Réglages par défaut rétablis (non sauvegardés)." ;;
+      q|Q|EOF) printf '\033[?25h\n'; trap - EXIT; exit 0 ;;
     esac
+    if [ "$sel" -lt "$NB_KEYS" ]; then
+      case "$KEY:${KEYS[$sel]}" in
+        LEFT:EXTENSIONS|LEFT:PREFIXE|RIGHT:EXTENSIONS|RIGHT:PREFIXE) compter_videos ;;
+      esac
+    fi
   done
+  printf '\033[?25h'
+  trap - EXIT
+  printf '\033[H\033[2J'
 }
 
 # --------------------------------------------------------------- traitement
+qualite_ffmpeg() { # % -> échelle -q:v de ffmpeg (2 = meilleure, 31 = pire)
+  local q=$(( 31 - (QUALITE * 29 + 50) / 100 ))
+  [ $q -lt 2 ] && q=2
+  [ $q -gt 31 ] && q=31
+  echo "$q"
+}
+
 traiter_video() {
   local video="$1" dir base sortie duree tmp i t lignes
 
@@ -178,7 +383,7 @@ traiter_video() {
   lignes=$(( (obtenues + cols - 1) / cols ))
 
   local opts_sortie=()
-  [ "$FORMAT" = "jpg" ] && opts_sortie=(-q:v "$QUALITE_JPG")
+  [ "$FORMAT" = "jpg" ] && opts_sortie=(-q:v "$(qualite_ffmpeg)")
 
   # Les noms 0001.png… ne sont pas forcément contigus si une capture a échoué :
   # on passe par un motif glob, qui lit tout ce qui existe dans l'ordre.
@@ -197,34 +402,77 @@ traiter_video() {
 }
 
 lancer() {
-  local args=() ext premier=1 total=0 ok=0 ko=0 video
+  local total=0 ok=0 ko=0 video
 
-  for ext in $EXTENSIONS; do
-    ext="${ext#.}"
-    [ $premier -eq 0 ] && args+=(-o)
-    args+=(-iname "*.${ext}")
-    premier=0
-  done
-  if [ $premier -eq 1 ]; then echo "Aucune extension configurée."; return 1; fi
+  if [ -z "${EXTENSIONS// /}" ]; then echo "Aucune extension configurée."; return 1; fi
 
-  local exclure=()
-  [ -n "$PREFIXE" ] && exclure=(! -name "${PREFIXE}*")
-
-  echo
-  echo "Recherche des vidéos dans $(pwd) …"
+  echo "Recherche des vidéos dans $PWD …"
   while IFS= read -r -d '' video <&3; do
     total=$((total+1))
     echo "[$total] $video"
     if traiter_video "$video"; then ok=$((ok+1)); else ko=$((ko+1)); fi
-  done 3< <(find . -type f \( "${args[@]}" \) \
-              "${exclure[@]+"${exclure[@]}"}" -print0 2>/dev/null | sort -z)
+  done 3< <(lister_videos)
 
   echo
   echo "Terminé : $total vidéo(s), $ok réussie(s), $ko en échec."
+  [ $ko -eq 0 ]
+}
+
+# ------------------------------------------------------------ ligne de commande
+usage() {
+  cat <<EOF
+Usage : $(basename "$0") [options]
+
+Sans option, un menu interactif permet de régler les paramètres. Les options
+préremplissent le menu ; avec -y, le traitement démarre sans menu.
+Les réglages sauvegardés (touche « s » du menu) sont dans :
+  $CONF_FILE
+
+  -n NB     nombre de captures par vidéo        (défaut $DEF_NB_CAPTURES)
+  -c NB     colonnes du damier                  (défaut $DEF_COLONNES)
+  -w PX     largeur d'une capture               (défaut $DEF_LARGEUR_VIGNETTE)
+  -m PX     marge entre les images              (défaut $DEF_MARGE_INTERNE)
+  -M PX     marge autour du damier              (défaut $DEF_MARGE_EXTERNE)
+  -b COUL   couleur de fond (black, 0x202020…)  (défaut $DEF_COULEUR_FOND)
+  -f FMT    format de sortie : jpg ou png       (défaut $DEF_FORMAT)
+  -q PCT    qualité JPEG de 1 à 100             (défaut $DEF_QUALITE)
+  -p TXT    préfixe du fichier de sortie        (défaut $DEF_PREFIXE)
+  -o DIR    dossier de sortie                   (défaut : à côté de la vidéo)
+  -F        écraser les planches existantes
+  -y        lancer directement, sans menu
+  -h        cette aide
+EOF
 }
 
 # --------------------------------------------------------------------- main
 verifier_outils
 charger_conf
-menu
+
+SANS_MENU=0
+while getopts "n:c:w:m:M:b:p:f:q:o:Fyh" opt; do
+  case "$opt" in
+    n) regler NB_CAPTURES "$OPTARG" ;;
+    c) regler COLONNES "$OPTARG" ;;
+    w) regler LARGEUR_VIGNETTE "$OPTARG" ;;
+    m) regler MARGE_INTERNE "$OPTARG" ;;
+    M) regler MARGE_EXTERNE "$OPTARG" ;;
+    b) regler COULEUR_FOND "$OPTARG" ;;
+    f) regler FORMAT "$OPTARG" ;;
+    q) regler QUALITE "$OPTARG" ;;
+    p) regler PREFIXE "$OPTARG" ;;
+    o) regler DOSSIER_SORTIE "$OPTARG" ;;
+    F) ECRASER="oui" ;;
+    y) SANS_MENU=1 ;;
+    h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+
+# Pas de menu si on n'est pas dans un terminal (script, cron, redirection).
+[ -t 0 ] && [ -t 1 ] || SANS_MENU=1
+
+if [ $SANS_MENU -eq 0 ]; then
+  compter_videos
+  menu
+fi
 lancer
