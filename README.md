@@ -1,35 +1,60 @@
 # planche-contact
 
-Script shell pour macOS qui parcourt le dossier courant et ses sous-dossiers, puis génère pour chaque vidéo une **planche contact** : plusieurs captures d'écran réparties uniformément sur la durée de la vidéo, assemblées en damier avec une légère marge, et enregistrées sous le nom de la vidéo précédé d'un préfixe.
+Script shell pour macOS qui parcourt le dossier courant et ses sous-dossiers, puis génère pour chaque vidéo une **planche contact** : plusieurs captures d'écran réparties uniformément sur la durée de la vidéo, assemblées en damier avec une légère marge, et enregistrées sous le nom de la vidéo, avec un préfixe et/ou un suffixe au choix.
 
-Les réglages se modifient dans un menu textuel au lancement du script.
+![Exemple de planche contact](docs/images/resultat.jpg)
+
+Les réglages se modifient dans un menu textuel navigable au clavier, ou directement par options en ligne de commande.
 
 ## Installation
 
 ```bash
 brew install ffmpeg          # fournit ffmpeg et ffprobe
-git clone https://github.com/charlescoiffier/planche-contact.git
-chmod +x planche-contact/planche-contact.sh
+git clone https://github.com/charlescoiffier/planche-contact.git ~/Developer/planche-contact
 ```
 
 Le script est compatible avec le bash 3.2 fourni avec macOS. Aucune autre dépendance.
 
-## Utilisation
+### En faire une commande
 
-Placez-vous dans le dossier à traiter, puis lancez le script :
+Créez un lien vers le script dans un dossier du `PATH` (le nom du lien est celui de la commande) :
 
 ```bash
-cd /dossier/de/videos
-/chemin/vers/planche-contact/planche-contact.sh
+mkdir -p ~/bin
+ln -s ~/Developer/planche-contact/planche-contact.sh ~/bin/planche-contact
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-Le menu s'affiche, avec le nombre de vidéos trouvées et un aperçu de la planche (nombre de lignes et de colonnes, taille approximative en pixels).
+Pour une commande plus courte, changez le nom du lien : `ln -s … ~/bin/planche`.
+
+### Mise à jour
+
+Le lien pointe vers le dépôt cloné : il suffit de le mettre à jour.
+
+```bash
+cd ~/Developer/planche-contact && git pull
+```
+
+## Utilisation
+
+Placez-vous dans le dossier à traiter, puis lancez la commande :
+
+```bash
+cd ~/Videos/vacances
+planche-contact
+```
+
+### Le menu
+
+![Menu interactif](docs/images/menu.png)
+
+Le menu affiche le nombre de vidéos trouvées, les réglages, et un aperçu de la planche (nombre de lignes et de colonnes, taille approximative en pixels).
 
 | Touche | Action |
 |---|---|
 | `↑` `↓` | Choisir un réglage (la dernière ligne, « Lancer le traitement », démarre le traitement avec Entrée) |
 | `←` `→` ou `Espace` | Modifier la valeur : ±1 pour les nombres (±20 px pour la largeur), liste de choix pour la couleur, le format et « écraser » |
-| `Entrée` | Saisir une valeur au clavier (nombre, couleur libre, préfixe, extensions, dossier) |
+| `Entrée` | Saisir une valeur au clavier (nombre, couleur libre, préfixe, suffixe, extensions, dossier) |
 | `s` | Sauvegarder les réglages dans `~/.planche-contact.conf` (rechargés au lancement suivant) |
 | `d` | Rétablir les réglages par défaut |
 | `l` | Lancer le traitement |
@@ -37,12 +62,19 @@ Le menu s'affiche, avec le nombre de vidéos trouvées et un aperçu de la planc
 
 Les valeurs invalides sont refusées avec un message. Pour le préfixe, le suffixe et le dossier de sortie, saisir `-` revient à « aucun » / « à côté de la vidéo ».
 
+### Le traitement
+
+![Traitement d'un dossier](docs/images/execution.png)
+
+Chaque vidéo est affichée avec le fichier produit et la disposition obtenue. Une planche déjà présente est ignorée, sauf si « Écraser l'existant » est sur `oui`.
+
 ### Sans menu : options en ligne de commande
 
-Les options préremplissent le menu et prennent le pas sur les réglages sauvegardés. Avec `-y`, le traitement démarre directement, ce qui permet de l'utiliser dans un autre script.
+Les options préremplissent le menu et prennent le pas sur les réglages sauvegardés. Avec `-y`, le traitement démarre directement, ce qui permet de l'utiliser dans un autre script. Sans terminal (script, cron, redirection), le menu n'est jamais affiché.
 
 ```bash
-planche-contact.sh -n 20 -c 5 -w 360 -p "contact_" -y
+planche-contact -n 12 -c 4 -w 360 -F -y
+planche-contact -p "" -s _planche -y      # plage.mp4 → plage_planche.jpg
 ```
 
 | Option | Réglage |
@@ -57,7 +89,7 @@ planche-contact.sh -n 20 -c 5 -w 360 -p "contact_" -y
 | `-p` / `-s` | Préfixe / suffixe du fichier produit |
 | `-o` | Dossier de sortie |
 | `-F` | Écraser les planches existantes |
-| `-y` | Lancer sans menu (automatique si le script n'est pas lancé dans un terminal) |
+| `-y` | Lancer sans menu |
 | `-h` | Aide |
 
 ## Réglages
@@ -87,4 +119,8 @@ planche-contact.sh -n 20 -c 5 -w 360 -p "contact_" -y
 - Les fichiers dont le nom commence par le préfixe sont ignorés lors de la recherche.
 - Si le nombre de captures n'est pas un multiple du nombre de colonnes, les cases vides prennent la couleur de fond.
 - Si certaines captures échouent, la planche est assemblée avec celles obtenues.
-- Une planche déjà présente n'est pas régénérée, sauf si « Écraser l'existant » est sur `oui` (ou avec `-F`).
+- Les calculs de durée sont indépendants de la langue du système (point décimal forcé), ce qui évite les erreurs avec une locale française.
+
+## Captures d'écran
+
+Les images de ce README sont générées à partir de la sortie réelle du script (rendu d'un terminal sombre), sur des vidéos de démonstration ; les chemins sont raccourcis en `~/Videos/vacances`.
