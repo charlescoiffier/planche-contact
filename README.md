@@ -60,13 +60,13 @@ Le menu affiche le nombre de vidéos trouvées, les réglages, et un aperçu de 
 | `l` | Lancer le traitement |
 | `q` | Quitter |
 
-Les valeurs invalides sont refusées avec un message. Pour le préfixe, le suffixe et le dossier de sortie, saisir `-` revient à « aucun » (pour le dossier de sortie : « à côté de chaque vidéo »).
+Les valeurs invalides sont refusées avec un message. Pour le préfixe, le suffixe et le dossier de sortie, saisir `-` revient à « aucun » (pour le dossier de sortie : « à côté de la vidéo »).
 
 ### Le traitement
 
 ![Traitement d'un dossier](docs/images/execution.png)
 
-Chaque vidéo est affichée avec le fichier produit et la disposition obtenue. Les planches sont rangées dans le sous-dossier `planches` du dossier analysé (voir plus bas). Une planche déjà présente est ignorée, sauf si « Écraser l'existant » est sur `oui`.
+Chaque vidéo est affichée avec le fichier produit et la disposition obtenue. Les planches sont rangées dans un sous-dossier `planches` créé dans chaque dossier contenant des vidéos (voir plus bas). Une planche déjà présente est ignorée, sauf si « Écraser l'existant » est sur `oui`.
 
 ### Sans menu : options en ligne de commande
 
@@ -75,6 +75,7 @@ Les options préremplissent le menu et prennent le pas sur les réglages sauvega
 ```bash
 planche-contact -n 12 -c 4 -w 360 -F -y
 planche-contact -p "" -s _planche -y      # plage.mp4 → planches/plage_planche.jpg
+planche-contact -o miniatures -y          # sous-dossiers « miniatures » au lieu de « planches »
 planche-contact -o "" -y                 # planches à côté de chaque vidéo
 ```
 
@@ -88,7 +89,7 @@ planche-contact -o "" -y                 # planches à côté de chaque vidéo
 | `-f` | Format (`jpg` ou `png`) |
 | `-q` | Qualité JPEG (1 à 100) |
 | `-p` / `-s` | Préfixe / suffixe du fichier produit |
-| `-o` | Sous-dossier de sortie (dans le dossier analysé) ; `-o ""` = à côté de chaque vidéo |
+| `-o` | Nom du sous-dossier de sortie, créé dans chaque dossier contenant des vidéos ; `-o ""` = à côté de la vidéo |
 | `-F` | Écraser les planches existantes |
 | `-y` | Lancer sans menu |
 | `-h` | Aide |
@@ -108,7 +109,7 @@ planche-contact -o "" -y                 # planches à côté de chaque vidéo
 | Préfixe du fichier de sortie (avant le nom) | `planche_` |
 | Suffixe du fichier de sortie (après le nom) | vide |
 | Extensions vidéo traitées | mp4 mov mkv avi m4v wmv flv webm mpg mpeg mts m2ts ts |
-| Sous-dossier de sortie, créé dans le dossier analysé (vide = à côté de chaque vidéo) | `planches` |
+| Sous-dossier de sortie, créé dans chaque dossier contenant des vidéos (vide = à côté de la vidéo) | `planches` |
 | Écraser les planches existantes | non |
 
 ## Fonctionnement
@@ -116,7 +117,7 @@ planche-contact -o "" -y                 # planches à côté de chaque vidéo
 - Les vidéos sont recherchées avec `find`, dans le dossier courant et tous ses sous-dossiers, sans tenir compte de la casse des extensions.
 - La durée est lue avec `ffprobe`. Les captures sont prises au milieu de N tranches égales de la vidéo : elles sont donc réparties uniformément, sans jamais tomber sur la toute première ou la toute dernière image.
 - L'assemblage utilise le filtre `tile` de ffmpeg (marge entre les images et marge extérieure réglables).
-- **Dossier de sortie.** Par défaut, les planches sont créées dans un sous-dossier `planches` du dossier d'où vous lancez la commande, avec la même arborescence que les vidéos : `plage.mp4` donne `planches/planche_plage.jpg` et `été 2026/randonnée.mov` donne `planches/été 2026/planche_randonnée.jpg`. Deux vidéos de même nom dans des dossiers différents ne s'écrasent donc pas. Le nom du sous-dossier se change dans le menu ou avec `-o` ; il doit rester à l'intérieur du dossier analysé (pas de chemin absolu ni de `..`). Avec un nom vide (`-o ""`), chaque planche est créée à côté de sa vidéo. Le dossier de sortie n'est pas parcouru lors de la recherche des vidéos.
+- **Dossier de sortie.** Par défaut, un sous-dossier `planches` est créé dans chaque dossier qui contient des vidéos, et les planches de ces vidéos y sont rangées : `plage.mp4` donne `planches/planche_plage.jpg`, et `été 2026/randonnée.mov` donne `été 2026/planches/planche_randonnée.jpg`. Les dossiers sans vidéo ne sont pas touchés, et les dossiers de sortie ne sont pas parcourus lors de la recherche. Le nom du sous-dossier se change dans le menu ou avec `-o` (un simple nom, sans `/`). Avec un nom vide (`-o ""`), chaque planche est créée à côté de sa vidéo.
 - Le fichier produit s'appelle `<préfixe><nom de la vidéo><suffixe>.<format>`. Par exemple, `plage.mp4` donne `planche_plage.jpg` avec le préfixe par défaut, ou `plage_planche.jpg` avec `-p "" -s _planche`. Préfixe et suffixe peuvent aussi être utilisés ensemble.
 - Les fichiers dont le nom commence par le préfixe sont ignorés lors de la recherche.
 - Si le nombre de captures n'est pas un multiple du nombre de colonnes, les cases vides prennent la couleur de fond.
