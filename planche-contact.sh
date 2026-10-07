@@ -352,7 +352,7 @@ traiter_video() {
 
   duree=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$video" 2>/dev/null)
   if [ -z "$duree" ] || [ "$duree" = "N/A" ] || \
-     ! awk -v d="$duree" 'BEGIN{exit !(d>0)}'; then
+     ! LC_ALL=C awk -v d="$duree" 'BEGIN{exit !(d>0)}'; then
     echo "  ! durée illisible, ignoré : $video" >&2
     return 1
   fi
@@ -362,7 +362,7 @@ traiter_video() {
   # Instants répartis uniformément : au milieu de N tranches égales,
   # donc jamais sur l'image noire du tout début ni de la toute fin.
   i=0
-  for t in $(awk -v d="$duree" -v n="$NB_CAPTURES" \
+  for t in $(LC_ALL=C awk -v d="$duree" -v n="$NB_CAPTURES" \
                'BEGIN{for(i=0;i<n;i++) printf "%.3f\n", d*(i+0.5)/n}'); do
     i=$((i+1))
     ffmpeg -nostdin -v error -y -ss "$t" -i "$video" -frames:v 1 \
