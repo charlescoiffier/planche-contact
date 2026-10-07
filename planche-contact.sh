@@ -24,7 +24,7 @@ QUALITE=95              # qualité JPEG en % (1 à 100)
 PREFIXE="planche_"      # texte ajouté AVANT le nom de la vidéo
 SUFFIXE=""              # texte ajouté APRÈS le nom de la vidéo (avant l'extension)
 EXTENSIONS="mp4 mov mkv avi m4v wmv flv webm mpg mpeg mts m2ts ts"
-DOSSIER_SORTIE=""       # vide = à côté de la vidéo ; sinon chemin
+DOSSIER_SORTIE="planches"  # sous-dossier du dossier analysé ; vide = à côté de chaque vidéo
 ECRASER="non"           # oui / non : remplacer une planche déjà existante
 
 # Description des réglages affichés dans le menu (tableaux parallèles).
@@ -53,7 +53,7 @@ HINTS=("Combien d'images extraites, réparties uniformément sur la vidéo."
        "Texte ajouté avant le nom de la vidéo (planche_plage.jpg). « - » pour aucun."
        "Texte ajouté après le nom, avant l'extension (plage_planche.jpg). « - » pour aucun."
        "Extensions séparées par des espaces."
-       "Vide = à côté de chaque vidéo. « - » pour revenir à ce mode."
+       "Sous-dossier créé dans le dossier analysé (arborescence recopiée). « - » = à côté de chaque vidéo."
        "Régénérer les planches déjà présentes ?")
 
 NB_KEYS=${#KEYS[@]}
@@ -113,6 +113,10 @@ valider() {
       case "${KEYS[$i]}" in
         EXTENSIONS) [ -n "${v// /}" ] || { ERR="au moins une extension"; return 1; } ;;
         PREFIXE|SUFFIXE) case "$v" in */*) ERR="« / » interdit dans un préfixe ou un suffixe"; return 1 ;; esac ;;
+        DOSSIER_SORTIE)
+          case "$v" in
+            /*|~*|..|../*|*/..|*/../*|.) ERR="le dossier doit être un sous-dossier du dossier analysé (pas de chemin absolu, de « .. » ni de ~)"; return 1 ;;
+          esac ;;
       esac ;;
   esac
   return 0
@@ -142,7 +146,9 @@ lister_videos() {
   done
   [ $premier -eq 1 ] && return 0
   [ -n "$PREFIXE" ] && exclure=(! -name "${PREFIXE}*")
-  find . -type f \( "${args[@]}" \) "${exclure[@]+"${exclure[@]}"}" -print0 2>/dev/null | sort -z
+  local elaguer=()
+  [ -n "$DOSSIER_SORTIE" ] && elaguer=(-path "./${DOSSIER_SORTIE%/}" -prune -o)
+  find . "${elaguer[@]+"${elaguer[@]}"}" -type f \( "${args[@]}" \) "${exclure[@]+"${exclure[@]}"}" -print0 2>/dev/null | sort -z
 }
 
 compter_videos() {
@@ -341,8 +347,12 @@ traiter_video() {
   base="${base%.*}"
 
   if [ -n "$DOSSIER_SORTIE" ]; then
-    mkdir -p "$DOSSIER_SORTIE" || return 1
-    sortie="$DOSSIER_SORTIE/${PREFIXE}${base}${SUFFIXE}.${FORMAT}"
+    # Dossier créé dans le dossier analysé, avec la même arborescence que les vidéos.
+    local rel="${dir#./}" dest="./${DOSSIER_SORTIE%/}"
+    [ "$dir" = "." ] && rel=""
+    [ -n "$rel" ] && dest="$dest/$rel"
+    mkdir -p "$dest" || return 1
+    sortie="$dest/${PREFIXE}${base}${SUFFIXE}.${FORMAT}"
   else
     sortie="$dir/${PREFIXE}${base}${SUFFIXE}.${FORMAT}"
   fi
@@ -440,7 +450,8 @@ Les réglages sauvegardés (touche « s » du menu) sont dans :
   -q PCT    qualité JPEG de 1 à 100             (défaut $DEF_QUALITE)
   -p TXT    préfixe du fichier de sortie        (défaut $DEF_PREFIXE)
   -s TXT    suffixe du fichier de sortie        (défaut aucun)
-  -o DIR    dossier de sortie                   (défaut : à côté de la vidéo)
+  -o DIR    sous-dossier de sortie, créé dans le dossier analysé
+            (défaut : $DEF_DOSSIER_SORTIE ; -o "" = à côté de chaque vidéo)
   -F        écraser les planches existantes
   -y        lancer directement, sans menu
   -h        cette aide
