@@ -24,24 +24,26 @@ QUALITE=95              # qualité JPEG en % (1 à 100)
 PREFIXE="planche_"      # texte ajouté AVANT le nom de la vidéo
 SUFFIXE=""              # texte ajouté APRÈS le nom de la vidéo (avant l'extension)
 EXTENSIONS="mp4 mov mkv avi m4v wmv flv webm mpg mpeg mts m2ts ts"
-DOSSIER_SORTIE="planches"  # sous-dossier créé dans chaque dossier contenant des vidéos ; vide = à côté de la vidéo
+POSITION_SORTIE="chaque"   # chaque (sous-dossier dans chaque dossier de vidéos) | racine (un seul
+                           # dossier dans le dossier analysé) | ailleurs (chemin libre) | cote (pas de sous-dossier)
+DOSSIER_SORTIE="planches"  # nom du dossier de sortie (ou chemin si POSITION_SORTIE=ailleurs)
 ECRASER="non"           # oui / non : remplacer une planche déjà existante
 
 # Description des réglages affichés dans le menu (tableaux parallèles).
 # Types : int (min/max/pas), choice (liste fermée), choice+ (liste + saisie
 # libre), text (saisie libre).
 KEYS=(NB_CAPTURES COLONNES LARGEUR_VIGNETTE MARGE_INTERNE MARGE_EXTERNE
-      COULEUR_FOND FORMAT QUALITE PREFIXE SUFFIXE EXTENSIONS DOSSIER_SORTIE ECRASER)
+      COULEUR_FOND FORMAT QUALITE PREFIXE SUFFIXE EXTENSIONS POSITION_SORTIE DOSSIER_SORTIE ECRASER)
 LABELS=("Nombre de captures" "Colonnes du damier" "Largeur d'une capture (px)"
         "Marge entre les images (px)" "Marge autour du damier (px)"
         "Couleur de fond" "Format de sortie" "Qualité JPEG (%)"
-        "Préfixe du fichier" "Suffixe du fichier" "Extensions traitées" "Dossier de sortie"
-        "Écraser l'existant")
-TYPES=(int int int int int choice+ choice int text text text text choice)
-MINS=(1 1 100 0 0 "" "" 1 "" "" "" "" "")
-MAXS=(500 50 4000 200 200 "" "" 100 "" "" "" "" "")
-STEPS=(1 1 20 1 1 "" "" 1 "" "" "" "" "")
-CHOICES=("" "" "" "" "" "black white gray 0x202020 0xf0f0f0" "jpg png" "" "" "" "" "" "non oui")
+        "Préfixe du fichier" "Suffixe du fichier" "Extensions traitées" "Emplacement des planches"
+        "Nom du dossier de sortie" "Écraser l'existant")
+TYPES=(int int int int int choice+ choice int text text text choice text choice)
+MINS=(1 1 100 0 0 "" "" 1 "" "" "" "" "" "")
+MAXS=(500 50 4000 200 200 "" "" 100 "" "" "" "" "" "")
+STEPS=(1 1 20 1 1 "" "" 1 "" "" "" "" "" "")
+CHOICES=("" "" "" "" "" "black white gray 0x202020 0xf0f0f0" "jpg png" "" "" "" "" "chaque racine ailleurs cote" "" "non oui")
 HINTS=("Combien d'images extraites, réparties uniformément sur la vidéo."
        "Nombre d'images par ligne du damier."
        "Largeur de chaque vignette ; la hauteur suit le format de la vidéo."
@@ -53,7 +55,8 @@ HINTS=("Combien d'images extraites, réparties uniformément sur la vidéo."
        "Texte ajouté avant le nom de la vidéo (planche_plage.jpg). « - » pour aucun."
        "Texte ajouté après le nom, avant l'extension (plage_planche.jpg). « - » pour aucun."
        "Extensions séparées par des espaces."
-       "Nom du sous-dossier créé dans chaque dossier contenant des vidéos. « - » = à côté de la vidéo."
+       "Où ranger les planches : dans chaque dossier de vidéos, à la racine, ailleurs, ou à côté."
+       "Nom du dossier (ex. planches). Avec « ailleurs » : chemin complet ou relatif (~ accepté)."
        "Régénérer les planches déjà présentes ?")
 
 NB_KEYS=${#KEYS[@]}
@@ -115,7 +118,7 @@ valider() {
         PREFIXE|SUFFIXE) case "$v" in */*) ERR="« / » interdit dans un préfixe ou un suffixe"; return 1 ;; esac ;;
         DOSSIER_SORTIE)
           case "$v" in
-            */*|.|..|~*) ERR="un simple nom de dossier est attendu (sans « / », « .. » ni ~)"; return 1 ;;
+            ..|../*|*/..|*/../*) ERR="« .. » n'est pas accepté dans le chemin"; return 1 ;;
           esac ;;
       esac ;;
   esac
@@ -135,6 +138,36 @@ regler() {
 }
 
 # ------------------------------------------------- recherche des vidéos
+# Calcule le dossier de sortie effectif (SORTIE_NOM) et les règles d'exclusion
+# de la recherche (ELAGUER) pour que les planches ne soient pas reparcourues.
+resoudre_sortie() {
+  local abs rel
+  SORTIE_NOM="${DOSSIER_SORTIE:-planches}"
+  case "$SORTIE_NOM" in "~"|"~/"*) SORTIE_NOM="$HOME${SORTIE_NOM#\~}" ;; esac
+  [ "${#SORTIE_NOM}" -gt 1 ] && SORTIE_NOM="${SORTIE_NOM%/}"
+  ELAGUER=()
+  case "$POSITION_SORTIE" in
+    chaque)  ELAGUER=(-type d -name "$SORTIE_NOM" -prune -o) ;;
+    racine)  ELAGUER=(-path "./$SORTIE_NOM" -prune -o) ;;
+    ailleurs)
+      case "$SORTIE_NOM" in /*) abs="$SORTIE_NOM" ;; *) abs="$PWD/$SORTIE_NOM" ;; esac
+      rel="${abs#"$PWD"/}"
+      [ "$rel" != "$abs" ] && ELAGUER=(-path "./$rel" -prune -o) ;;
+  esac
+}
+
+# verifier_sortie : renvoie 1 (et ERR) si l'emplacement et le nom sont incompatibles.
+verifier_sortie() {
+  local nom="${DOSSIER_SORTIE:-planches}"
+  case "$POSITION_SORTIE" in
+    chaque)
+      case "$nom" in */*) ERR="« dans chaque dossier » demande un simple nom (sans « / »)"; return 1 ;; esac ;;
+    racine)
+      case "$nom" in /*|"~"*) ERR="« à la racine » demande un chemin relatif au dossier analysé ; utilisez « ailleurs » pour un chemin complet"; return 1 ;; esac ;;
+  esac
+  return 0
+}
+
 # Écrit sur stdout les chemins (séparés par NUL) des vidéos à traiter.
 lister_videos() {
   local args=() ext premier=1 exclure=()
@@ -146,9 +179,8 @@ lister_videos() {
   done
   [ $premier -eq 1 ] && return 0
   [ -n "$PREFIXE" ] && exclure=(! -name "${PREFIXE}*")
-  local elaguer=()
-  [ -n "$DOSSIER_SORTIE" ] && elaguer=(-type d -name "$DOSSIER_SORTIE" -prune -o)
-  find . "${elaguer[@]+"${elaguer[@]}"}" -type f \( "${args[@]}" \) "${exclure[@]+"${exclure[@]}"}" -print0 2>/dev/null | sort -z
+  resoudre_sortie
+  find . "${ELAGUER[@]+"${ELAGUER[@]}"}" -type f \( "${args[@]}" \) "${exclure[@]+"${exclure[@]}"}" -print0 2>/dev/null | sort -z
 }
 
 compter_videos() {
@@ -182,13 +214,23 @@ lire_touche() {
 valeur_affichee() { # valeur_affichee INDICE
   local i=$1 k v
   k="${KEYS[$i]}"; v="${!k}"
+  case "$k" in
+    POSITION_SORTIE)
+      case "$v" in
+        chaque)   printf '‹ dans chaque dossier de vidéos ›' ;;
+        racine)   printf '‹ à la racine du dossier analysé ›' ;;
+        ailleurs) printf '‹ ailleurs (chemin libre) ›' ;;
+        cote)     printf '‹ à côté des vidéos, sans sous-dossier ›' ;;
+      esac
+      return ;;
+  esac
   case "${TYPES[$i]}" in
     int|choice|choice+) printf '‹ %s ›' "$v" ;;
     *)
       if [ -z "$v" ]; then
         case "$k" in
           PREFIXE|SUFFIXE) printf '\033[2m‹aucun›\033[22m' ;;
-          DOSSIER_SORTIE) printf '\033[2m‹à côté de chaque vidéo›\033[22m' ;;
+          DOSSIER_SORTIE)  printf '\033[2m‹planches›\033[22m' ;;
         esac
       else
         printf '%s' "$v"
@@ -217,6 +259,14 @@ apercu() {
   fi
 }
 
+ACTIONS=("Lancer le traitement" "Sauvegarder les réglages" "Rétablir les valeurs par défaut" "Quitter")
+ACTION_HINTS=("Traite toutes les vidéos trouvées avec les réglages ci-dessus."
+              "Enregistre les réglages dans $CONF_FILE (rechargés au prochain lancement)."
+              "Remet tous les réglages à leur valeur d'origine (sans les sauvegarder)."
+              "Quitte sans rien traiter.")
+NB_ACTIONS=${#ACTIONS[@]}
+NB_LIGNES=$(( ${#KEYS[@]} + NB_ACTIONS ))
+
 dessiner() { # dessiner SELECTION
   local sel=$1 i pad label marque
   printf '\033[H\033[2J'
@@ -231,19 +281,31 @@ dessiner() { # dessiner SELECTION
     printf ' %s %s%*s' "$marque" "$label" "$pad" ''
     if [ "${KEYS[$i]}" = "QUALITE" ] && [ "$FORMAT" != "jpg" ]; then
       printf '\033[2m(jpg uniquement)\033[22m'
+    elif [ "${KEYS[$i]}" = "DOSSIER_SORTIE" ] && [ "$POSITION_SORTIE" = "cote" ]; then
+      printf '\033[2m(sans objet)\033[22m'
     else
       valeur_affichee "$i"
     fi
     printf '\033[0m\n'
   done
-  if [ "$sel" -eq "$NB_KEYS" ]; then printf '\033[7m\033[1m'; else printf '\033[1m'; fi
-  printf '\n ▶ LANCER LE TRAITEMENT\033[0m\n\n'
+  printf '\n'
+  for ((i = 0; i < NB_ACTIONS; i++)); do
+    marque=" "
+    if [ $((NB_KEYS + i)) -eq "$sel" ]; then marque="▶"; printf '\033[7m'; fi
+    [ "$i" -eq 0 ] && printf '\033[1m'
+    printf ' %s %s\033[0m\n' "$marque" "${ACTIONS[$i]}"
+  done
+  printf '\n'
   apercu
   printf '\n'
-  if [ "$sel" -lt "$NB_KEYS" ]; then printf ' \033[2m%s\033[22m\n' "${HINTS[$sel]}"; fi
+  if [ "$sel" -lt "$NB_KEYS" ]; then
+    printf ' \033[2m%s\033[22m\n' "${HINTS[$sel]}"
+  else
+    printf ' \033[2m%s\033[22m\n' "${ACTION_HINTS[$((sel - NB_KEYS))]}"
+  fi
   [ -n "$MSG" ] && printf ' \033[33m%s\033[0m\n' "$MSG"
   MSG=""
-  printf '\n \033[2m↑↓ choisir   ←→ modifier   Entrée saisir/lancer   s sauvegarder   d défauts   q quitter\033[22m\n'
+  printf '\n \033[2m↑↓ choisir   ←→ modifier   Entrée saisir / valider   (raccourcis : l s d q)\033[22m\n'
 }
 
 ajuster() { # ajuster INDICE SENS(+1/-1)
@@ -292,37 +354,58 @@ editer() { # editer INDICE : saisie au clavier d'une valeur
   esac
   if valider "$i" "$val"; then
     printf -v "$k" '%s' "$val"
-    case "$k" in EXTENSIONS|PREFIXE) compter_videos ;; esac
+    case "$k" in EXTENSIONS|PREFIXE|DOSSIER_SORTIE) compter_videos ;; esac
   else
     MSG="Valeur refusée : $ERR."
   fi
 }
 
+reinitialiser() {
+  local k v
+  for k in "${KEYS[@]}"; do v="DEF_$k"; printf -v "$k" '%s' "${!v}"; done
+  compter_videos
+  MSG="Réglages par défaut rétablis (non sauvegardés)."
+}
+
+quitter() { printf '\033[?25h\n'; trap - EXIT; exit 0; }
+
+# lancer_ok : vérifie les réglages avant de démarrer (message dans MSG sinon)
+lancer_ok() {
+  if ! verifier_sortie; then MSG="Réglage à corriger : $ERR."; return 1; fi
+  return 0
+}
+
 menu() {
-  local sel=0 k v
+  local sel=0 k
   trap 'printf "\033[?25h\n"' EXIT
   printf '\033[?25l'
   while true; do
     dessiner "$sel"
     lire_touche
     case "$KEY" in
-      UP)    sel=$(( (sel + NB_KEYS) % (NB_KEYS + 1) )) ;;
-      DOWN)  sel=$(( (sel + 1) % (NB_KEYS + 1) )) ;;
+      UP)    sel=$(( (sel + NB_LIGNES - 1) % NB_LIGNES )) ;;
+      DOWN)  sel=$(( (sel + 1) % NB_LIGNES )) ;;
       LEFT)  [ "$sel" -lt "$NB_KEYS" ] && ajuster "$sel" -1 ;;
       RIGHT|' ') [ "$sel" -lt "$NB_KEYS" ] && ajuster "$sel" 1 ;;
       ENTER)
-        if [ "$sel" -eq "$NB_KEYS" ]; then break; else editer "$sel"; fi ;;
-      l|L) break ;;
+        if [ "$sel" -lt "$NB_KEYS" ]; then
+          editer "$sel"
+        else
+          case $((sel - NB_KEYS)) in
+            0) lancer_ok && break ;;
+            1) sauver_conf; MSG="Réglages sauvegardés dans $CONF_FILE" ;;
+            2) reinitialiser ;;
+            3) quitter ;;
+          esac
+        fi ;;
+      l|L) lancer_ok && break ;;
       s|S) sauver_conf; MSG="Réglages sauvegardés dans $CONF_FILE" ;;
-      d|D)
-        for k in "${KEYS[@]}"; do v="DEF_$k"; printf -v "$k" '%s' "${!v}"; done
-        compter_videos
-        MSG="Réglages par défaut rétablis (non sauvegardés)." ;;
-      q|Q|EOF) printf '\033[?25h\n'; trap - EXIT; exit 0 ;;
+      d|D) reinitialiser ;;
+      q|Q|EOF) quitter ;;
     esac
     if [ "$sel" -lt "$NB_KEYS" ]; then
       case "$KEY:${KEYS[$sel]}" in
-        LEFT:EXTENSIONS|LEFT:PREFIXE|RIGHT:EXTENSIONS|RIGHT:PREFIXE) compter_videos ;;
+        LEFT:EXTENSIONS|LEFT:PREFIXE|LEFT:POSITION_SORTIE|RIGHT:EXTENSIONS|RIGHT:PREFIXE|RIGHT:POSITION_SORTIE) compter_videos ;;
       esac
     fi
   done
@@ -346,14 +429,16 @@ traiter_video() {
   base=$(basename "$video")
   base="${base%.*}"
 
-  if [ -n "$DOSSIER_SORTIE" ]; then
-    # Sous-dossier créé à côté des vidéos, dans chaque dossier qui en contient.
-    local dest="$dir/$DOSSIER_SORTIE"
-    mkdir -p "$dest" || return 1
-    sortie="$dest/${PREFIXE}${base}${SUFFIXE}.${FORMAT}"
-  else
-    sortie="$dir/${PREFIXE}${base}${SUFFIXE}.${FORMAT}"
-  fi
+  local rel="${dir#./}" dest
+  [ "$dir" = "." ] && rel=""
+  case "$POSITION_SORTIE" in
+    cote)     dest="$dir" ;;
+    chaque)   dest="$dir/$SORTIE_NOM" ;;
+    racine)   dest="./$SORTIE_NOM${rel:+/$rel}" ;;
+    ailleurs) dest="$SORTIE_NOM${rel:+/$rel}" ;;
+  esac
+  [ "$dest" != "$dir" ] && { mkdir -p "$dest" || return 1; }
+  sortie="$dest/${PREFIXE}${base}${SUFFIXE}.${FORMAT}"
 
   if [ -e "$sortie" ] && [ "$ECRASER" != "oui" ]; then
     echo "  = déjà présent, ignoré : $sortie"
@@ -416,6 +501,7 @@ lancer() {
 
   if [ -z "${EXTENSIONS// /}" ]; then echo "Aucune extension configurée."; return 1; fi
 
+  resoudre_sortie
   echo "Recherche des vidéos dans $PWD …"
   while IFS= read -r -d '' video <&3; do
     total=$((total+1))
@@ -448,8 +534,12 @@ Les réglages sauvegardés (touche « s » du menu) sont dans :
   -q PCT    qualité JPEG de 1 à 100             (défaut $DEF_QUALITE)
   -p TXT    préfixe du fichier de sortie        (défaut $DEF_PREFIXE)
   -s TXT    suffixe du fichier de sortie        (défaut aucun)
-  -o NOM    sous-dossier de sortie, créé dans chaque dossier contenant
-            des vidéos (défaut : $DEF_DOSSIER_SORTIE ; -o "" = à côté de la vidéo)
+  -O POS    emplacement du dossier de sortie (défaut : $DEF_POSITION_SORTIE) :
+              chaque    un sous-dossier dans chaque dossier contenant des vidéos
+              racine    un seul dossier dans le dossier analysé (arborescence recopiée)
+              ailleurs  chemin libre donné avec -o (arborescence recopiée)
+              cote      à côté de chaque vidéo, sans sous-dossier
+  -o NOM    nom du dossier de sortie (défaut : $DEF_DOSSIER_SORTIE) ; un chemin avec -O ailleurs
   -F        écraser les planches existantes
   -y        lancer directement, sans menu
   -h        cette aide
@@ -461,7 +551,7 @@ verifier_outils
 charger_conf
 
 SANS_MENU=0
-while getopts "n:c:w:m:M:b:p:s:f:q:o:Fyh" opt; do
+while getopts "n:c:w:m:M:b:p:s:f:q:o:O:Fyh" opt; do
   case "$opt" in
     n) regler NB_CAPTURES "$OPTARG" ;;
     c) regler COLONNES "$OPTARG" ;;
@@ -474,6 +564,7 @@ while getopts "n:c:w:m:M:b:p:s:f:q:o:Fyh" opt; do
     p) regler PREFIXE "$OPTARG" ;;
     s) regler SUFFIXE "$OPTARG" ;;
     o) regler DOSSIER_SORTIE "$OPTARG" ;;
+    O) regler POSITION_SORTIE "$OPTARG" ;;
     F) ECRASER="oui" ;;
     y) SANS_MENU=1 ;;
     h) usage; exit 0 ;;
@@ -487,5 +578,8 @@ done
 if [ $SANS_MENU -eq 0 ]; then
   compter_videos
   menu
+elif ! verifier_sortie; then
+  echo "Réglage à corriger : $ERR." >&2
+  exit 2
 fi
 lancer
