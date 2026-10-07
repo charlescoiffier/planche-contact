@@ -35,7 +35,7 @@ Le menu s'affiche, avec le nombre de vidéos trouvées et un aperçu de la planc
 | `l` | Lancer le traitement |
 | `q` | Quitter |
 
-Les valeurs invalides sont refusées avec un message. Pour le préfixe et le dossier de sortie, saisir `-` revient à « aucun » / « à côté de la vidéo ».
+Les valeurs invalides sont refusées avec un message. Pour le préfixe, le suffixe et le dossier de sortie, saisir `-` revient à « aucun » / « à côté de la vidéo ».
 
 ### Sans menu : options en ligne de commande
 
@@ -54,7 +54,7 @@ planche-contact.sh -n 20 -c 5 -w 360 -p "contact_" -y
 | `-b` | Couleur de fond |
 | `-f` | Format (`jpg` ou `png`) |
 | `-q` | Qualité JPEG (1 à 100) |
-| `-p` | Préfixe |
+| `-p` / `-s` | Préfixe / suffixe du fichier produit |
 | `-o` | Dossier de sortie |
 | `-F` | Écraser les planches existantes |
 | `-y` | Lancer sans menu (automatique si le script n'est pas lancé dans un terminal) |
@@ -72,7 +72,8 @@ planche-contact.sh -n 20 -c 5 -w 360 -p "contact_" -y
 | Couleur de fond (nom ffmpeg ou `0xRRGGBB`) | black |
 | Format de sortie : `jpg` ou `png` | jpg |
 | Qualité JPEG (1 à 100, jpg uniquement) | 95 |
-| Préfixe du fichier de sortie | `planche_` |
+| Préfixe du fichier de sortie (avant le nom) | `planche_` |
+| Suffixe du fichier de sortie (après le nom) | vide |
 | Extensions vidéo traitées | mp4 mov mkv avi m4v wmv flv webm mpg mpeg mts m2ts ts |
 | Dossier de sortie (vide = à côté de la vidéo) | vide |
 | Écraser les planches existantes | non |
@@ -82,7 +83,7 @@ planche-contact.sh -n 20 -c 5 -w 360 -p "contact_" -y
 - Les vidéos sont recherchées avec `find`, dans le dossier courant et tous ses sous-dossiers, sans tenir compte de la casse des extensions.
 - La durée est lue avec `ffprobe`. Les captures sont prises au milieu de N tranches égales de la vidéo : elles sont donc réparties uniformément, sans jamais tomber sur la toute première ou la toute dernière image.
 - L'assemblage utilise le filtre `tile` de ffmpeg (marge entre les images et marge extérieure réglables).
-- Le fichier produit s'appelle `<préfixe><nom de la vidéo>.<format>`. Par exemple, `vacances/plage.mp4` donne `vacances/planche_plage.jpg`.
+- Le fichier produit s'appelle `<préfixe><nom de la vidéo><suffixe>.<format>`. Par exemple, `vacances/plage.mp4` donne `vacances/planche_plage.jpg` avec le préfixe par défaut, ou `vacances/plage_planche.jpg` avec `-p "" -s _planche`. Préfixe et suffixe peuvent aussi être utilisés ensemble.
 - Les fichiers dont le nom commence par le préfixe sont ignorés lors de la recherche.
 - Si le nombre de captures n'est pas un multiple du nombre de colonnes, les cases vides prennent la couleur de fond.
 - Si certaines captures échouent, la planche est assemblée avec celles obtenues.

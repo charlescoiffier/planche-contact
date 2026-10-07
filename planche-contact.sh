@@ -21,7 +21,8 @@ MARGE_EXTERNE=6         # marge autour du damier (px)
 COULEUR_FOND="black"    # couleur de fond / des marges (nom ffmpeg ou 0xRRGGBB)
 FORMAT="jpg"            # jpg ou png
 QUALITE=95              # qualité JPEG en % (1 à 100)
-PREFIXE="planche_"      # préfixe du fichier de sortie
+PREFIXE="planche_"      # texte ajouté AVANT le nom de la vidéo
+SUFFIXE=""              # texte ajouté APRÈS le nom de la vidéo (avant l'extension)
 EXTENSIONS="mp4 mov mkv avi m4v wmv flv webm mpg mpeg mts m2ts ts"
 DOSSIER_SORTIE=""       # vide = à côté de la vidéo ; sinon chemin
 ECRASER="non"           # oui / non : remplacer une planche déjà existante
@@ -30,17 +31,17 @@ ECRASER="non"           # oui / non : remplacer une planche déjà existante
 # Types : int (min/max/pas), choice (liste fermée), choice+ (liste + saisie
 # libre), text (saisie libre).
 KEYS=(NB_CAPTURES COLONNES LARGEUR_VIGNETTE MARGE_INTERNE MARGE_EXTERNE
-      COULEUR_FOND FORMAT QUALITE PREFIXE EXTENSIONS DOSSIER_SORTIE ECRASER)
+      COULEUR_FOND FORMAT QUALITE PREFIXE SUFFIXE EXTENSIONS DOSSIER_SORTIE ECRASER)
 LABELS=("Nombre de captures" "Colonnes du damier" "Largeur d'une capture (px)"
         "Marge entre les images (px)" "Marge autour du damier (px)"
         "Couleur de fond" "Format de sortie" "Qualité JPEG (%)"
-        "Préfixe du fichier" "Extensions traitées" "Dossier de sortie"
+        "Préfixe du fichier" "Suffixe du fichier" "Extensions traitées" "Dossier de sortie"
         "Écraser l'existant")
-TYPES=(int int int int int choice+ choice int text text text choice)
-MINS=(1 1 100 0 0 "" "" 1 "" "" "" "")
-MAXS=(500 50 4000 200 200 "" "" 100 "" "" "" "")
-STEPS=(1 1 20 1 1 "" "" 1 "" "" "" "")
-CHOICES=("" "" "" "" "" "black white gray 0x202020 0xf0f0f0" "jpg png" "" "" "" "" "non oui")
+TYPES=(int int int int int choice+ choice int text text text text choice)
+MINS=(1 1 100 0 0 "" "" 1 "" "" "" "" "")
+MAXS=(500 50 4000 200 200 "" "" 100 "" "" "" "" "")
+STEPS=(1 1 20 1 1 "" "" 1 "" "" "" "" "")
+CHOICES=("" "" "" "" "" "black white gray 0x202020 0xf0f0f0" "jpg png" "" "" "" "" "" "non oui")
 HINTS=("Combien d'images extraites, réparties uniformément sur la vidéo."
        "Nombre d'images par ligne du damier."
        "Largeur de chaque vignette ; la hauteur suit le format de la vidéo."
@@ -49,7 +50,8 @@ HINTS=("Combien d'images extraites, réparties uniformément sur la vidéo."
        "Couleur des marges : choisir avec ←/→ ou saisir (nom ffmpeg, 0xRRGGBB)."
        "jpg (léger) ou png (sans perte)."
        "100 = meilleure qualité, fichier plus lourd (jpg uniquement)."
-       "Début du nom du fichier produit. « - » pour aucun préfixe."
+       "Texte ajouté avant le nom de la vidéo (planche_plage.jpg). « - » pour aucun."
+       "Texte ajouté après le nom, avant l'extension (plage_planche.jpg). « - » pour aucun."
        "Extensions séparées par des espaces."
        "Vide = à côté de chaque vidéo. « - » pour revenir à ce mode."
        "Régénérer les planches déjà présentes ?")
@@ -110,7 +112,7 @@ valider() {
     text)
       case "${KEYS[$i]}" in
         EXTENSIONS) [ -n "${v// /}" ] || { ERR="au moins une extension"; return 1; } ;;
-        PREFIXE)    case "$v" in */*) ERR="« / » interdit dans un préfixe"; return 1 ;; esac ;;
+        PREFIXE|SUFFIXE) case "$v" in */*) ERR="« / » interdit dans un préfixe ou un suffixe"; return 1 ;; esac ;;
       esac ;;
   esac
   return 0
@@ -179,7 +181,7 @@ valeur_affichee() { # valeur_affichee INDICE
     *)
       if [ -z "$v" ]; then
         case "$k" in
-          PREFIXE)        printf '\033[2m‹aucun›\033[22m' ;;
+          PREFIXE|SUFFIXE) printf '\033[2m‹aucun›\033[22m' ;;
           DOSSIER_SORTIE) printf '\033[2m‹à côté de chaque vidéo›\033[22m' ;;
         esac
       else
@@ -280,7 +282,7 @@ editer() { # editer INDICE : saisie au clavier d'une valeur
   printf '\033[?25l'
   [ -z "$val" ] && return
   case "$k" in
-    PREFIXE|DOSSIER_SORTIE) [ "$val" = "-" ] && val="" ;;
+    PREFIXE|SUFFIXE|DOSSIER_SORTIE) [ "$val" = "-" ] && val="" ;;
   esac
   if valider "$i" "$val"; then
     printf -v "$k" '%s' "$val"
@@ -340,9 +342,9 @@ traiter_video() {
 
   if [ -n "$DOSSIER_SORTIE" ]; then
     mkdir -p "$DOSSIER_SORTIE" || return 1
-    sortie="$DOSSIER_SORTIE/${PREFIXE}${base}.${FORMAT}"
+    sortie="$DOSSIER_SORTIE/${PREFIXE}${base}${SUFFIXE}.${FORMAT}"
   else
-    sortie="$dir/${PREFIXE}${base}.${FORMAT}"
+    sortie="$dir/${PREFIXE}${base}${SUFFIXE}.${FORMAT}"
   fi
 
   if [ -e "$sortie" ] && [ "$ECRASER" != "oui" ]; then
@@ -437,6 +439,7 @@ Les réglages sauvegardés (touche « s » du menu) sont dans :
   -f FMT    format de sortie : jpg ou png       (défaut $DEF_FORMAT)
   -q PCT    qualité JPEG de 1 à 100             (défaut $DEF_QUALITE)
   -p TXT    préfixe du fichier de sortie        (défaut $DEF_PREFIXE)
+  -s TXT    suffixe du fichier de sortie        (défaut aucun)
   -o DIR    dossier de sortie                   (défaut : à côté de la vidéo)
   -F        écraser les planches existantes
   -y        lancer directement, sans menu
@@ -449,7 +452,7 @@ verifier_outils
 charger_conf
 
 SANS_MENU=0
-while getopts "n:c:w:m:M:b:p:f:q:o:Fyh" opt; do
+while getopts "n:c:w:m:M:b:p:s:f:q:o:Fyh" opt; do
   case "$opt" in
     n) regler NB_CAPTURES "$OPTARG" ;;
     c) regler COLONNES "$OPTARG" ;;
@@ -460,6 +463,7 @@ while getopts "n:c:w:m:M:b:p:f:q:o:Fyh" opt; do
     f) regler FORMAT "$OPTARG" ;;
     q) regler QUALITE "$OPTARG" ;;
     p) regler PREFIXE "$OPTARG" ;;
+    s) regler SUFFIXE "$OPTARG" ;;
     o) regler DOSSIER_SORTIE "$OPTARG" ;;
     F) ECRASER="oui" ;;
     y) SANS_MENU=1 ;;
