@@ -1,3 +1,6 @@
+> [!WARNING]
+> Ce projet a été vibecodé avec l’aide de l’intelligence artificielle.
+
 # planche-contact
 
 Script shell pour macOS qui parcourt le dossier courant et ses sous-dossiers, puis génère pour chaque vidéo une **planche contact** : plusieurs captures d'écran réparties uniformément sur la durée de la vidéo, assemblées en damier avec une légère marge, et enregistrées sous le nom de la vidéo, avec un préfixe et/ou un suffixe au choix.
